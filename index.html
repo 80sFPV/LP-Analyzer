@@ -121,45 +121,45 @@
     }
 
     document.getElementById("start").addEventListener("click", async () => {
-  const lp = parseInt(document.getElementById("lp").value);
-  document.getElementById("results").innerHTML = "Lade Daten…";
+      const lp = parseInt(document.getElementById("lp").value);
+      document.getElementById("results").innerHTML = "Lade Daten…";
 
-  try {
-    const text = await fetch("LPA_Database.csv").then(r => r.text());
-    const result = await analyze(text, lp);
+      try {
+        const text = await fetch("LPA_Database.csv").then(r => r.text());
+        const result = await analyze(text, lp);
 
-    const table = `
-      <table class="min-w-full text-sm text-left border border-gray-200">
-        <thead class="bg-gray-100 sticky top-0">
-          <tr>
-            <th class="px-3 py-2 border-b">Name</th>
-            <th class="px-3 py-2 border-b text-right">Wert (ISK)</th>
-            <th class="px-3 py-2 border-b text-right">Kosten (ISK)</th>
-            <th class="px-3 py-2 border-b text-right">Volumen</th>
-            <th class="px-3 py-2 border-b text-right">ISK/LP</th>
-          </tr>
-        </thead>
-        <tbody>
-        ${result.map(r => `
-          <tr class="hover:bg-gray-50">
-            <td class="px-3 py-2 border-b">${r.name}</td>
-            <td class="px-3 py-2 border-b text-right">${formatISK(r.value)}</td>
-            <td class="px-3 py-2 border-b text-right">${formatISK(r.cost)}</td>
-            <td class="px-3 py-2 border-b text-right">${formatVol(r.volume)}</td>
-            <td class="px-3 py-2 border-b text-right">${formatISKLP(r.iskpl)}</td>
-          </tr>`).join("")}
-      </tbody>
-    </table>
-    `;
+        const table = `
+          <table class="min-w-full text-sm text-left border border-gray-200">
+            <thead class="bg-gray-100 sticky top-0">
+              <tr>
+                <th class="px-3 py-2 border-b">Name</th>
+                <th class="px-3 py-2 border-b text-right">Wert (ISK)</th>
+                <th class="px-3 py-2 border-b text-right">Kosten (ISK)</th>
+                <th class="px-3 py-2 border-b text-right">Volumen</th>
+                <th class="px-3 py-2 border-b text-right">ISK/LP</th>
+              </tr>
+            </thead>
+            <tbody>
+            ${result.map(r => `
+              <tr class="hover:bg-gray-50">
+                <td class="px-3 py-2 border-b">${r.name}</td>
+                <td class="px-3 py-2 border-b text-right">${formatISK(r.value)}</td>
+                <td class="px-3 py-2 border-b text-right">${formatISK(r.cost)}</td>
+                <td class="px-3 py-2 border-b text-right">${formatVol(r.volume)}</td>
+                <td class="px-3 py-2 border-b text-right">${formatISKLP(r.iskpl)}</td>
+              </tr>`).join("")}
+            </tbody>
+          </table>
+        `;
 
-    document.getElementById("results").innerHTML = table;
+        document.getElementById("results").innerHTML = table;
 
-  } catch (err) {
-    console.error("Fehler bei Analyse:", err);
-    document.getElementById("results").innerHTML = "Fehler beim Laden der Daten.";
-  }
-});
-
+      } catch (err) {
+        console.error("Fehler bei Analyse:", err);
+        document.getElementById("results").innerHTML = "Fehler beim Laden der Daten.";
+      }
+    });
   </script>
 </body>
 </html>
+
