@@ -1,115 +1,157 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8">
   <title>EVE LP Analyse</title>
-  <style>
-    body { font-family: sans-serif; margin: 20px; }
-    input, button { padding: 6px; margin: 5px; }
-    table { border-collapse: collapse; width: 100%; margin-top: 10px; }
-    th, td { border: 1px solid #ccc; padding: 6px; text-align: left; }
-    th { background: #eee; }
-  </style>
+  <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body>
-  <h1>EVE LP Analyse im Browser</h1>
-
-  <label for="lp">Verfügbare LP: </label>
-  <input type="number" id="lp" value="100000" min="0" />
-
-  <input type="file" id="csvfile" accept=".csv" />
-  <button onclick="analyze()">Analyse starten</button>
-
-  <div id="status"></div>
-  <table id="result"></table>
+<body class="bg-gray-100 text-gray-900 font-sans">
+  <div class="max-w-6xl mx-auto py-8 px-4">
+    <h1 class="text-3xl font-bold text-center mb-6">EVE LP Analyse</h1>
+    <div class="flex flex-wrap items-center justify-center gap-4 mb-6">
+      <label class="flex items-center gap-2">
+        <span>Verfügbare LP</span>
+        <input type="number" id="lp" value="100000" class="px-2 py-1 border rounded w-32">
+      </label>
+      <button id="start" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Analyse starten</button>
+    </div>
+    <div id="results" class="bg-white shadow-md rounded p-4 overflow-x-auto">Ergebnisse erscheinen hier…</div>
+  </div>
 
   <script>
-    async function fetchWeightedPrice(typeId) {
-      const url = `https://esi.evetech.net/latest/markets/10000002/orders/?order_type=sell&type_id=${typeId}`;
+    function formatISK(number) {
+      return Number(number).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function formatVol(number) {
+      return Number(number).toLocaleString("de-DE", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    }
+
+    function formatISKLP(value) {
+      const val = Number(value);
+      const color = val >= 1500 ? "text-green-600" : val >= 1000 ? "text-yellow-600" : "text-red-600";
+      return `<span class="${color} font-semibold">${formatISK(val)}</span>`;
+    }
+
+    async function fetchItemName(typeId) {
       try {
-        const res = await fetch(url);
+        const res = await fetch(`https://esi.evetech.net/latest/universe/types/${typeId}/`);
+        if (!res.ok) throw new Error("API error");
         const data = await res.json();
-        const jitaOrders = data.filter(o => o.location_id === 60003760);
-        const sorted = jitaOrders.sort((a, b) => a.price - b.price);
-        const zielvol = sorted.reduce((sum, o) => sum + o.volume_remain, 0) * 0.05;
-        let auf = 0, wert = 0;
-        for (let o of sorted) {
-          const nimm = Math.min(o.volume_remain, zielvol - auf);
-          if (nimm <= 0) break;
-          auf += nimm;
-          wert += nimm * o.price;
-        }
-        return auf > 0 ? wert / auf : null;
-      } catch (err) {
-        console.error("API-Fehler bei type_id=" + typeId, err);
-        return null;
+        return data.name || `Type ${typeId}`;
+      } catch {
+        return `Type ${typeId}`;
       }
     }
 
-    function parseCSV(text) {
-      const lines = text.trim().split("\n");
-      const headers = lines[0].split(",");
-      return lines.slice(1).map(line => {
-        const cells = line.split(",");
-        return Object.fromEntries(headers.map((h, i) => [h, cells[i]]));
-      });
+    async function getMarketPrice(typeId) {
+      try {
+        const url = `https://esi.evetech.net/latest/markets/10000002/orders/?order_type=sell&type_id=${typeId}`;
+        const res = await fetch(url);
+        if (!res.ok) return { price: null, volume: 0 };
+        const orders = await res.json();
+        const stationId = 60003760;
+        const filtered = orders.filter(o => o.location_id === stationId && !o.is_buy_order);
+        const sorted = filtered.sort((a, b) => a.price - b.price);
+        const totalVolume = sorted.reduce((sum, o) => sum + o.volume_remain, 0);
+        const zielvolumen = totalVolume * 0.05;
+        let aufgenommen = 0;
+        let wert = 0;
+        for (const o of sorted) {
+          const nimm = Math.min(o.volume_remain, zielvolumen - aufgenommen);
+          if (nimm <= 0) break;
+          aufgenommen += nimm;
+          wert += nimm * o.price;
+        }
+        const avgPrice = aufgenommen > 0 ? wert / aufgenommen : null;
+        return { price: avgPrice, volume: totalVolume };
+      } catch {
+        return { price: null, volume: 0 };
+      }
     }
 
-    async function analyze() {
-      const lpLimit = parseInt(document.getElementById("lp").value);
-      const file = document.getElementById("csvfile").files[0];
-      if (!file) return alert("Bitte eine CSV-Datei hochladen.");
+    async function analyze(csvText, lpLimit) {
+      const lines = csvText.split("\n").filter(line => line.trim());
+      const headers = lines[0].split(",");
+      const data = lines.slice(1).map(line =>
+        Object.fromEntries(line.split(",").map((val, i) => [headers[i], val]))
+      );
 
-      document.getElementById("status").innerText = "CSV wird verarbeitet...";
+      const filtered = lpLimit
+        ? data.filter(entry => parseInt(entry["LP Cost"] || "0") <= lpLimit)
+        : data;
 
-      const text = await file.text();
-      const offers = parseCSV(text).filter(o => parseInt(o["LP Cost"]) <= lpLimit);
+      const results = [];
 
-      const result = [];
-      for (const offer of offers) {
-        const rewardId = parseInt(offer["Reward ID"]);
-        const rewardAmount = parseInt(offer["Reward Amount"]);
-        const lpCost = parseInt(offer["LP Cost"]);
-        const iskCost = parseInt(offer["ISK Cost"]);
-        if (!rewardId || !rewardAmount || !lpCost) continue;
+      for (const entry of filtered) {
+        const rewardId = parseInt(entry["Reward ID"]);
+        const rewardAmount = parseInt(entry["Reward Amount"]);
+        const lpCost = parseInt(entry["LP Cost"]);
+        const iskCost = parseInt(entry["ISK Cost"]);
+        const rewardName = await fetchItemName(rewardId);
 
-        const rewardPrice = await fetchWeightedPrice(rewardId);
+        const { price: rewardPrice, volume: marketVolume } = await getMarketPrice(rewardId);
         if (!rewardPrice) continue;
-        const rewardValue = rewardAmount * rewardPrice;
+        let rewardValue = rewardAmount * rewardPrice;
 
-        let totalRequired = 0;
+        let itemCost = 0;
         for (let i = 1; i <= 10; i++) {
-          const id = parseInt(offer[`Required Item ${i} ID`]);
-          const amt = parseInt(offer[`Required Item ${i} Amount`]);
-          if (id && amt) {
-            const price = await fetchWeightedPrice(id) || 0;
-            totalRequired += price * amt;
+          const itemId = parseInt(entry[`Required Item ${i} ID`] || "0");
+          const itemAmount = parseInt(entry[`Required Item ${i} Amount`] || "0");
+          if (itemId && itemAmount) {
+            const { price: itemPrice } = await getMarketPrice(itemId);
+            if (itemPrice) itemCost += itemPrice * itemAmount;
           }
         }
 
-        const totalCost = iskCost + totalRequired;
+        const totalCost = iskCost + itemCost;
         const profit = rewardValue - totalCost;
-        const iskPerLp = profit / lpCost;
+        const iskPerLP = profit / lpCost;
 
-        result.push({
-          Name: offer["Reward Name"],
-          "ISK/LP": iskPerLp.toFixed(2),
-          "Wert (ISK)": rewardValue.toFixed(2),
-          "Kosten (ISK)": totalCost.toFixed(2),
-          "Profit (ISK)": profit.toFixed(2)
+        results.push({
+          name: rewardName,
+          iskpl: iskPerLP,
+          value: rewardValue,
+          cost: totalCost,
+          volume: marketVolume
         });
       }
 
-      result.sort((a, b) => b["ISK/LP"] - a["ISK/LP"]);
-
-      const table = document.getElementById("result");
-      const header = Object.keys(result[0] || {}).map(k => `<th>${k}</th>`).join("");
-      const rows = result.map(r => `<tr>${Object.values(r).map(v => `<td>${v}</td>`).join("")}</tr>`).join("");
-      table.innerHTML = `<tr>${header}</tr>${rows}`;
-
-      document.getElementById("status").innerText = `Fertig – ${result.length} Ergebnisse.`;
+      return results.sort((a, b) => b.iskpl - a.iskpl);
     }
+
+    document.getElementById("start").addEventListener("click", async () => {
+      const lp = parseInt(document.getElementById("lp").value);
+      document.getElementById("results").innerHTML = "Lade Daten…";
+
+      try {
+        const text = await fetch("LPA_Database.csv").then(r => r.text());
+        const result = await analyze(text, lp);
+        const table = `
+          <table class="min-w-full text-sm text-left border border-gray-200">
+            <thead class="bg-gray-100 sticky top-0">
+              <tr>
+                <th class="px-3 py-2 border-b">Name</th>
+                <th class="px-3 py-2 border-b text-right">Wert (ISK)</th>
+                <th class="px-3 py-2 border-b text-right">Kosten (ISK)</th>
+                <th class="px-3 py-2 border-b text-right">Volumen</th>
+                <th class="px-3 py-2 border-b text-right">ISK/LP</th>
+              </tr>
+            </thead>
+            <tbody>
+            ${result.map(r => `
+              <tr class="hover:bg-gray-50">
+                <td class="px-3 py-2 border-b">${r.name}</td>
+                <td class="px-3 py-2 border-b text-right">${formatISK(r.value)}</td>
+                <td class="px-3 py-2 border-b text-right">${formatISK(r.cost)}</td>
+				<td class="px-3 py-2 border-b text-right">${formatVol(r.volume)}</td>
+                <td class="px-3 py-2 border-b text-right">${formatISKLP(r.iskpl)}</td>
+              </tr>`).join("")}
+          </tbody>
+        </table>
+      `;
+      document.getElementById("results").innerHTML = table;
+    });
   </script>
 </body>
 </html>
