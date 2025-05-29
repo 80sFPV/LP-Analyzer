@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EVE LP Analyse</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    input, button { padding: 6px; margin: 5px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+    th, td { border: 1px solid #ccc; padding: 6px; text-align: left; }
+    th { background: #eee; }
+  </style>
+</head>
+<body>
+  <h1>EVE LP Analyse im Browser</h1>
+
+  <label for="lp">Verfügbare LP: </label>
+  <input type="number" id="lp" value="100000" min="0" />
+
+  <input type="file" id="csvfile" accept=".csv" />
+  <button onclick="analyze()">Analyse starten</button>
+
+  <div id="status"></div>
+  <table id="result"></table>
+
+  <script>
+    async function fetchWeightedPrice(typeId) {
+      const url = `https://esi.evetech.net/latest/markets/10000002/orders/?order_type=sell&type_id=${typeId}`;
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+        const jitaOrders = data.filter(o => o.location_id === 60003760);
+        const sorted = jitaOrders.sort((a, b) => a.price - b.price);
+        const zielvol = sorted.reduce((sum, o) => sum + o.volume_remain, 0) * 0.05;
+        let auf = 0, wert = 0;
+        for (let o of sorted) {
+          const nimm = Math.min(o.volume_remain, zielvol - auf);
+          if (nimm <= 0) break;
+          auf += nimm;
+          wert += nimm * o.price;
+        }
+        return auf > 0 ? wert / auf : null;
+      } catch (err) {
+        console.error("API-Fehler bei type_id=" + typeId, err);
+        return null;
+      }
+    }
+
+    function parseCSV(text) {
+      const lines = text.trim().split("\n");
+      const headers = lines[0].split(",");
+      return lines.slice(1).map(line => {
+        const cells = line.split(",");
+        return Object.fromEntries(headers.map((h, i) => [h, cells[i]]));
+      });
+    }
+
+    async function analyze() {
+      const lpLimit = parseInt(document.getElementById("lp").value);
+      const file = document.getElementById("csvfile").files[0];
+      if (!file) return alert("Bitte eine CSV-Datei hochladen.");
+
+      document.getElementById("status").innerText = "CSV wird verarbeitet...";
+
+      const text = await file.text();
+      const offers = parseCSV(text).filter(o => parseInt(o["LP Cost"]) <= lpLimit);
+
+      const result = [];
+      for (const offer of offers) {
+        const rewardId = parseInt(offer["Reward ID"]);
+        const rewardAmount = parseInt(offer["Reward Amount"]);
+        const lpCost = parseInt(offer["LP Cost"]);
+        const iskCost = parseInt(offer["ISK Cost"]);
+        if (!rewardId || !rewardAmount || !lpCost) continue;
+
+        const rewardPrice = await fetchWeightedPrice(rewardId);
+        if (!rewardPrice) continue;
+        const rewardValue = rewardAmount * rewardPrice;
+
+        let totalRequired = 0;
+        for (let i = 1; i <= 10; i++) {
+          const id = parseInt(offer[`Required Item ${i} ID`]);
+          const amt = parseInt(offer[`Required Item ${i} Amount`]);
+          if (id && amt) {
+            const price = await fetchWeightedPrice(id) || 0;
+            totalRequired += price * amt;
+          }
+        }
+
+        const totalCost = iskCost + totalRequired;
+        const profit = rewardValue - totalCost;
+        const iskPerLp = profit / lpCost;
+
+        result.push({
+          Name: offer["Reward Name"],
+          "ISK/LP": iskPerLp.toFixed(2),
+          "Wert (ISK)": rewardValue.toFixed(2),
+          "Kosten (ISK)": totalCost.toFixed(2),
+          "Profit (ISK)": profit.toFixed(2)
+        });
+      }
+
+      result.sort((a, b) => b["ISK/LP"] - a["ISK/LP"]);
+
+      const table = document.getElementById("result");
+      const header = Object.keys(result[0] || {}).map(k => `<th>${k}</th>`).join("");
+      const rows = result.map(r => `<tr>${Object.values(r).map(v => `<td>${v}</td>`).join("")}</tr>`).join("");
+      table.innerHTML = `<tr>${header}</tr>${rows}`;
+
+      document.getElementById("status").innerText = `Fertig – ${result.length} Ergebnisse.`;
+    }
+  </script>
+</body>
+</html>
