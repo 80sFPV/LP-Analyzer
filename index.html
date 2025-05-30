@@ -39,6 +39,8 @@
       return `<span class="${color} font-semibold">${formatISK(val)}</span>`;
     }
 
+    const priceCache = new Map();
+
     async function fetchItemName(typeId) {
       try {
         const res = await fetch(`https://esi.evetech.net/latest/universe/types/${typeId}/`);
@@ -76,6 +78,13 @@
       }
     }
 
+    async function getCachedMarketPrice(typeId) {
+      if (priceCache.has(typeId)) return priceCache.get(typeId);
+      const result = await getMarketPrice(typeId);
+      priceCache.set(typeId, result);
+      return result;
+    }
+
     async function analyze(csvText, lpLimit) {
       const lines = csvText.split("\n").filter(line => line.trim());
       const headers = lines[0].split(",");
@@ -92,22 +101,23 @@
       let count = 0;
 
       for (const entry of filtered) {
-        const rewardId = parseInt(entry["Reward ID"]);
-        const rewardAmount = parseInt(entry["Reward Amount"]);
-        const lpCost = parseInt(entry["LP Cost"]);
-        const iskCost = parseInt(entry["ISK Cost"]);
+        const rewardId = parseInt(entry["Reward ID"] || "0") || 0;
+        const rewardAmount = parseInt(entry["Reward Amount"] || "0") || 0;
+        const lpCost = parseInt(entry["LP Cost"] || "0") || 0;
+        const iskCost = parseInt(entry["ISK Cost"] || "0") || 0;
+        if (!rewardId || !rewardAmount || !lpCost) continue;
+
         const rewardName = await fetchItemName(rewardId);
-
-        const { price: rewardPrice, volume: marketVolume } = await getMarketPrice(rewardId);
+        const { price: rewardPrice, volume: marketVolume } = await getCachedMarketPrice(rewardId);
         if (!rewardPrice) continue;
-        let rewardValue = rewardAmount * rewardPrice;
 
+        let rewardValue = rewardAmount * rewardPrice;
         let itemCost = 0;
         for (let i = 1; i <= 10; i++) {
-          const itemId = parseInt(entry[`Required Item ${i} ID`] || "0");
-          const itemAmount = parseInt(entry[`Required Item ${i} Amount`] || "0");
+          const itemId = parseInt(entry[`Required Item ${i} ID`] || "0") || 0;
+          const itemAmount = parseInt(entry[`Required Item ${i} Amount`] || "0") || 0;
           if (itemId && itemAmount) {
-            const { price: itemPrice } = await getMarketPrice(itemId);
+            const { price: itemPrice } = await getCachedMarketPrice(itemId);
             if (itemPrice) itemCost += itemPrice * itemAmount;
           }
         }
